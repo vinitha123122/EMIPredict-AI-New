@@ -1,5 +1,15 @@
 # C:\Users\hp\Documents\DS_internship\emi_prediction_app\Home.py
 import streamlit as st
+import pandas as pd
+import os
+
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+import sklearn.compose._column_transformer
+
+
 
 st.set_page_config(
     page_title="EMIPredict AI - Financial Risk Assessment",
