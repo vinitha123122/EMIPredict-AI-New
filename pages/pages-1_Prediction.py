@@ -17,6 +17,8 @@ import sklearn.compose._column_transformer
 # ---------------------------------------------------------------------
 
 # --- 1. Load Models and Setup ---
+CLS_PIPELINE = None
+REG_PIPELINE = None
 try:
     CLS_PIPELINE = joblib.load('best_emi_classifier_pipeline.pkl')
     REG_PIPELINE = joblib.load('best_emi_regressor_pipeline.pkl')
