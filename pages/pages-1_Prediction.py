@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
+import pickle
 import xgboost # Required to load XGBoost models
 
 # --- FIX for AttributeError: Can't get attribute '_RemainderColsList' ---
