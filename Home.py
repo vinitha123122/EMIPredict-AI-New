@@ -15,24 +15,26 @@ import sklearn.compose._column_transformer # Import to ensure it's available if 
 
 @st.cache_resource
 def load_models(model_name):
-    # This assumes your models are named best_emi_classifier_pipeline.pkl and best_emi_regressor_pipeline.pkl
+    # REMOVED: import joblib (It must use the global import at the top of Home.py)
     try:
         model_path = os.path.join(os.path.dirname(__file__), model_name)
-        model = joblib.load(model_path)
+        # It now uses the global joblib module:
+        model = joblib.load(model_path) 
         return model
     except Exception as e:
-        st.error(f"Error loading model {model_name}: {e}")
+        st.error(f"Error loading model {model_name}. Please check the file name and path. Detailed error: {e}")
         return None
 
 # Load the models using caching
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
 
-# --- CRITICAL FIX: SHARE MODELS VIA SESSION STATE ---
+# --- Model Sharing Logic (This is correct) ---
 if CLASSIFIER is not None:
     st.session_state['CLASSIFIER'] = CLASSIFIER
 if REGRESSOR is not None:
     st.session_state['REGRESSOR'] = REGRESSOR
+
 # ----------------------------------------------------
 
 if CLASSIFIER is None or REGRESSOR is None:
