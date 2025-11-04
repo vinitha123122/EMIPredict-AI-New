@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import os
-import joblib
+import joblib # Ensure joblib is imported at the top
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -13,12 +13,9 @@ import sklearn.compose._column_transformer # Import to ensure it's available if 
 
 # --- Caching Functions (Critical for Streamlit Cloud) ---
 
-# Mock function to load models/pipelines
-# This is where your actual model loading logic (using joblib.load) should go.
 @st.cache_resource
 def load_models(model_name):
     # This assumes your models are named best_emi_classifier_pipeline.pkl and best_emi_regressor_pipeline.pkl
-    import joblib
     try:
         model_path = os.path.join(os.path.dirname(__file__), model_name)
         model = joblib.load(model_path)
@@ -28,19 +25,18 @@ def load_models(model_name):
         return None
 
 # Load the models using caching
-# Note: They are only loaded once on the first run of the app.
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
 
-# --- ADD THESE LINES TO SHARE MODELS ---
+# --- CRITICAL FIX: SHARE MODELS VIA SESSION STATE ---
 if CLASSIFIER is not None:
     st.session_state['CLASSIFIER'] = CLASSIFIER
 if REGRESSOR is not None:
     st.session_state['REGRESSOR'] = REGRESSOR
-# ----------------------------------------
+# ----------------------------------------------------
 
 if CLASSIFIER is None or REGRESSOR is None:
-    st.error("Application cannot run because one or both required model files failed to load. Ensure 'best_emi_classifier_pipeline.pkl' and 'best_emi_regressor_pipeline.pkl' are in the root directory.")
+    st.error("Application cannot run because one or both required model files failed to load. Please check file paths.")
     st.stop()
     
 # --- Streamlit UI Start ---
