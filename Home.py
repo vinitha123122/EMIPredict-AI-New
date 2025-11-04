@@ -18,7 +18,7 @@ import sklearn.compose._column_transformer # Import to ensure it's available if 
 @st.cache_resource
 def load_models(model_name):
     # This assumes your models are named best_emi_classifier_pipeline.pkl and best_emi_regressor_pipeline.pkl
-    import joblib
+    
     try:
         model_path = os.path.join(os.path.dirname(__file__), model_name)
         model = joblib.load(model_path)
@@ -31,6 +31,13 @@ def load_models(model_name):
 # Note: They are only loaded once on the first run of the app.
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
+
+# --- CRITICAL: SHARE MODELS VIA SESSION STATE (This is correct) ---
+if CLASSIFIER is not None:
+    st.session_state['CLASSIFIER'] = CLASSIFIER
+if REGRESSOR is not None:
+    st.session_state['REGRESSOR'] = REGRESSOR
+# ------------------------------------------------------------------
 
 if CLASSIFIER is None or REGRESSOR is None:
     st.error("Application cannot run because one or both required model files failed to load. Ensure 'best_emi_classifier_pipeline.pkl' and 'best_emi_regressor_pipeline.pkl' are in the root directory.")
