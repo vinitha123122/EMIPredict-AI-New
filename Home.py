@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import joblib
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
