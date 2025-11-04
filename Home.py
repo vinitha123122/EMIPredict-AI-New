@@ -32,6 +32,13 @@ def load_models(model_name):
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
 
+# --- ADD THESE LINES TO SHARE MODELS ---
+if CLASSIFIER is not None:
+    st.session_state['CLASSIFIER'] = CLASSIFIER
+if REGRESSOR is not None:
+    st.session_state['REGRESSOR'] = REGRESSOR
+# ----------------------------------------
+
 if CLASSIFIER is None or REGRESSOR is None:
     st.error("Application cannot run because one or both required model files failed to load. Ensure 'best_emi_classifier_pipeline.pkl' and 'best_emi_regressor_pipeline.pkl' are in the root directory.")
     st.stop()
