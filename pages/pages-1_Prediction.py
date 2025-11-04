@@ -5,34 +5,23 @@ import os
 import joblib # Critical import for this file
 from math import log1p
 
-# --- Global Access to Models and Setup ---
-# The models should be loaded and cached in the Home.py file.
-# We access them here via Streamlit's global state or by rerunning the cache function.
-
-# Note: We assume the Home.py file has defined and loaded CLASSIFIER and REGRESSOR
-# via st.cache_resource, making them globally accessible to pages when they run.
-
-# To ensure robustness, we can defensively reload/define the global variables,
-# but since the app runs, they are likely available via the primary run.
-try:
-    # Attempt to load CLASSIFIER and REGRESSOR from Home.py's shared context
-    CLASSIFIER = st.session_state.get('CLASSIFIER')
-    REGRESSOR = st.session_state.get('REGRESSOR')
-    if CLASSIFIER is None or REGRESSOR is None:
-        # Fallback/Error state - Should not happen if Home.py ran correctly
-        st.error("Error: Models were not properly loaded in Home.py. Cannot run prediction.")
-        st.stop()
-except Exception as e:
-    st.error(f"Error accessing cached models: {e}")
-    st.stop()
-
-
 # --- Streamlit Page Setup ---
 st.title("📈 Real-time Risk Prediction")
 st.markdown("---")
+
+# --- 1. Access Models from Session State (Robust Method) ---
+# The models MUST be loaded and stored in st.session_state in Home.py first.
+CLASSIFIER = st.session_state.get('CLASSIFIER')
+REGRESSOR = st.session_state.get('REGRESSOR')
+
+if CLASSIFIER is None or REGRESSOR is None:
+    st.error("❌ Error: Models were not properly loaded in Home.py. Cannot run prediction.")
+    st.markdown("Please go back to the **Home** page to ensure models are loaded correctly.")
+    st.stop()
+    
+# --- Input Fields Start ---
 st.subheader("Input Customer Financial Details")
 
-# --- 2. Input Fields ---
 with st.form("prediction_form"):
     
     # --- Row 1: Demographics ---
@@ -166,9 +155,8 @@ if submitted:
     predicted_proba = np.max(cls_proba)
     
     # Regression Prediction (Max EMI)
-    # The regressor was trained on log-transformed target (log1p)
     log_reg_pred = REGRESSOR.predict(X_pred)[0]
-    max_emi_pred = np.expm1(log_reg_pred) # Inverse transformation: expm1(log_reg_pred) = exp(log_reg_pred) - 1
+    max_emi_pred = np.expm1(log_reg_pred) # Inverse transformation: expm1(log_reg_pred)
     
     # --- 7. Display Results ---
     st.markdown("## 📊 Prediction Results")
@@ -198,4 +186,4 @@ if submitted:
     elif cls_pred == 'High_Risk':
         st.markdown(f"**Recommendation:** **Conditional Approval**. The customer is moderate-risk. Offer a reduced loan amount or a strict EMI of no more than **${max_emi_pred:,.2f}**.")
     else:
-        st.markdown(f"**Recommendation:** **Decline** the loan request. The customer's financial profile indicates a high risk of default, as they can only afford an EMI of **${max_emi_pred:,.2f}**, which may be insufficient for the requested amount.")
+        st.markdown(f"**Recommendation:** **Decline** the loan request. The customer's financial profile indicates a high risk of default, as they can only afford an EMI of **${max_emi_pred:,.2f}**.")
