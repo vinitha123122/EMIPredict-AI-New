@@ -29,13 +29,12 @@ def load_models(model_name):
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
 
-# --- Model Sharing Logic (This is correct) ---
+# --- THIS IS THE CRUCIAL BLOCK ---
 if CLASSIFIER is not None:
     st.session_state['CLASSIFIER'] = CLASSIFIER
 if REGRESSOR is not None:
     st.session_state['REGRESSOR'] = REGRESSOR
-
-# ----------------------------------------------------
+# -----------------------------------
 
 if CLASSIFIER is None or REGRESSOR is None:
     st.error("Application cannot run because one or both required model files failed to load. Please check file paths.")
