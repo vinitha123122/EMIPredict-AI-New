@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import os
-import joblib # Ensure joblib is imported at the top
+import joblib
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -13,31 +13,27 @@ import sklearn.compose._column_transformer # Import to ensure it's available if 
 
 # --- Caching Functions (Critical for Streamlit Cloud) ---
 
+# Mock function to load models/pipelines
+# This is where your actual model loading logic (using joblib.load) should go.
 @st.cache_resource
 def load_models(model_name):
-    # REMOVED: import joblib (It must use the global import at the top of Home.py)
+    # This assumes your models are named best_emi_classifier_pipeline.pkl and best_emi_regressor_pipeline.pkl
+    import joblib
     try:
         model_path = os.path.join(os.path.dirname(__file__), model_name)
-        # It now uses the global joblib module:
-        model = joblib.load(model_path) 
+        model = joblib.load(model_path)
         return model
     except Exception as e:
-        st.error(f"Error loading model {model_name}. Please check the file name and path. Detailed error: {e}")
+        st.error(f"Error loading model {model_name}: {e}")
         return None
 
 # Load the models using caching
+# Note: They are only loaded once on the first run of the app.
 CLASSIFIER = load_models('best_emi_classifier_pipeline.pkl')
 REGRESSOR = load_models('best_emi_regressor_pipeline.pkl')
 
-# --- THIS IS THE CRUCIAL BLOCK ---
-if CLASSIFIER is not None:
-    st.session_state['CLASSIFIER'] = CLASSIFIER
-if REGRESSOR is not None:
-    st.session_state['REGRESSOR'] = REGRESSOR
-# -----------------------------------
-
 if CLASSIFIER is None or REGRESSOR is None:
-    st.error("Application cannot run because one or both required model files failed to load. Please check file paths.")
+    st.error("Application cannot run because one or both required model files failed to load. Ensure 'best_emi_classifier_pipeline.pkl' and 'best_emi_regressor_pipeline.pkl' are in the root directory.")
     st.stop()
     
 # --- Streamlit UI Start ---
