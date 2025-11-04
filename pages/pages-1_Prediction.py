@@ -1,186 +1,201 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
-import xgboost
-import joblib # Required to load XGBoost models
+import os
+import joblib # Critical import for this file
+from math import log1p
 
-# --- FIX for AttributeError: Can't get attribute '_RemainderColsList' ---
-# Explicitly import all components needed by the saved pipeline structure.
-# This forces the Python interpreter to recognize internal classes used 
-# during serialization (e.g., ColumnTransformer components).
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import SimpleImputer
-# The specific module that contains the hidden class:
-import sklearn.compose._column_transformer 
-# ---------------------------------------------------------------------
+# --- Global Access to Models and Setup ---
+# The models should be loaded and cached in the Home.py file.
+# We access them here via Streamlit's global state or by rerunning the cache function.
 
-# --- 1. Load Models and Setup ---
-CLS_PIPELINE = None
-REG_PIPELINE = None
+# Note: We assume the Home.py file has defined and loaded CLASSIFIER and REGRESSOR
+# via st.cache_resource, making them globally accessible to pages when they run.
+
+# To ensure robustness, we can defensively reload/define the global variables,
+# but since the app runs, they are likely available via the primary run.
 try:
-    CLS_PIPELINE = joblib.load('best_emi_classifier_pipeline.pkl')
-    REG_PIPELINE = joblib.load('best_emi_regressor_pipeline.pkl')
-    st.sidebar.success("Models loaded successfully.")
-except FileNotFoundError:
-    st.error("Error: Model files not found. Ensure .pkl files are in the root directory.")
-    CLS_PIPELINE = None
-    REG_PIPELINE = None
+    # Attempt to load CLASSIFIER and REGRESSOR from Home.py's shared context
+    CLASSIFIER = st.session_state.get('CLASSIFIER')
+    REGRESSOR = st.session_state.get('REGRESSOR')
+    if CLASSIFIER is None or REGRESSOR is None:
+        # Fallback/Error state - Should not happen if Home.py ran correctly
+        st.error("Error: Models were not properly loaded in Home.py. Cannot run prediction.")
+        st.stop()
 except Exception as e:
-    # Catch any remaining load error and display for debugging
-    st.error(f"Failed to load model files despite fix. Error: {e}")
-    CLS_PIPELINE = None
-    REG_PIPELINE = None
+    st.error(f"Error accessing cached models: {e}")
+    st.stop()
 
 
-# --- 2. Feature Engineering Logic (MUST match Step 4) ---
-def apply_feature_engineering(df):
-    """Applies the exact feature engineering steps used during model training."""
-    epsilon = 1e-6
-
-    # Base expense columns
-    expense_only_cols = ['monthly_rent', 'school_fees', 'college_fees', 'travel_expenses', 
-                         'groceries_utilities', 'other_monthly_expenses']
-    
-    # Calculate Engineered Features
-    total_debt_and_emi = df[expense_only_cols].sum(axis=1) + df['current_emi_amount']
-    df['DTI_ratio'] = total_debt_and_emi / (df['monthly_salary'] + epsilon)
-    df['LTI_ratio'] = df['requested_amount'] / (df['monthly_salary'] + epsilon)
-    df['ETI_ratio'] = df[expense_only_cols].sum(axis=1) / (df['monthly_salary'] + epsilon)
-    df['liquidity_to_loan_ratio'] = df['bank_balance'] / (df['requested_amount'] + epsilon)
-    df['employment_stability_score'] = df['years_of_employment'] / (df['age'] + epsilon)
-    df['bank_health_score'] = df['bank_balance'] / (df['monthly_salary'] + epsilon)
-
-    # Interaction features
-    df['capped_DTI_safety'] = 1 - np.minimum(df['DTI_ratio'], 1.0)
-    df['credit_debt_interaction'] = df['credit_score'] * df['capped_DTI_safety']
-    df['salary_balance_interaction'] = df['monthly_salary'] * df['bank_balance']
-    df.drop(columns=['capped_DTI_safety'], inplace=True, errors='ignore')
-    
-    # Define the final feature set expected by the pipeline (X)
-    X_final = df.drop(columns=[
-        'emi_scenario', 'requested_amount', 'current_emi_amount', 
-        'monthly_rent', 'school_fees', 'college_fees', 'travel_expenses', 
-        'groceries_utilities', 'other_monthly_expenses'
-    ])
-    
-    return X_final
-
-# --- 3. Streamlit UI and Prediction Logic ---
+# --- Streamlit Page Setup ---
 st.title("📈 Real-time Risk Prediction")
+st.markdown("---")
 st.subheader("Input Customer Financial Details")
 
-if CLS_PIPELINE and REG_PIPELINE:
-    with st.form("customer_input_form"):
-        # ... [Input fields below] ...
-        st.write("---")
+# --- 2. Input Fields ---
+with st.form("prediction_form"):
+    
+    # --- Row 1: Demographics ---
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        age = st.number_input("Age", min_value=18, max_value=100, value=35)
+        gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+        marital_status = st.selectbox("Marital Status", ["Married", "Single", "Divorced", "Widowed"])
+    
+    with col2:
+        education = st.selectbox("Education Level", ["High School", "Bachelors", "Masters", "PhD", "Other"])
+        employment_type = st.selectbox("Employment Type", ["Salaried", "Business Owner", "Self-Employed", "Retired", "Student"])
+        years_of_employment = st.number_input("Years of Employment", min_value=0, max_value=60, value=5)
         
-        # --- Demographic Inputs (Row 1) ---
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            age = st.number_input("Age", 18, 90, 35)
-            gender = st.selectbox("Gender", ["Male", "Female"])
-        with col2:
-            marital_status = st.selectbox("Marital Status", ["Married", "Single", "Divorced"])
-            education = st.selectbox("Education", ["Professional", "Graduate", "High School"])
-        with col3:
-            family_size = st.number_input("Family Size", 1, 10, 4)
-            dependents = st.number_input("Dependents", 0, 5, 2)
-        with col4:
-            house_type = st.selectbox("House Type", ["Owned", "Rented", "Family"])
-            existing_loans = st.selectbox("Existing Loans", ["Yes", "No"])
-            
-        st.write("---")
+    with col3:
+        credit_score = st.number_input("Credit Score", min_value=300, max_value=850, value=750)
+        num_dependents = st.number_input("Number of Dependents", min_value=0, max_value=10, value=2)
         
-        # --- Income & Loan Request Inputs (Row 2) ---
-        col5, col6, col7, col8 = st.columns(4)
-        with col5:
-            monthly_salary = st.number_input("Monthly Salary ($)", 1000.0, 500000.0, 75000.0, step=1000.0)
-            requested_amount = st.number_input("Requested Loan Amount ($)", 1000.0, 1000000.0, 350000.0, step=5000.0)
-        with col6:
-            employment_type = st.selectbox("Employment Type", ["Private", "Government", "Business"])
-            years_of_employment = st.number_input("Years of Employment", 0.0, 40.0, 5.0, step=0.1)
-        with col7:
-            credit_score = st.number_input("Credit Score", 500, 900, 720)
-            bank_balance = st.number_input("Bank Balance ($)", 0.0, 1000000.0, 250000.0, step=1000.0)
-        with col8:
-            emergency_fund = st.number_input("Emergency Fund ($)", 0.0, 500000.0, 50000.0, step=1000.0)
-            requested_tenure = st.number_input("Requested Tenure (Months)", 6, 120, 36)
-            company_type = st.selectbox("Company Type", ["MNC", "Mid-size", "Large Indian", "Startup"])
+    st.markdown("---")
+    st.subheader("Financial Details (USD)")
 
-        st.write("---")
-        st.subheader("Monthly Expenses and Liabilities")
+    # --- Row 2: Income and Assets ---
+    col4, col5, col6 = st.columns(3)
+    
+    with col4:
+        monthly_salary = st.number_input("Monthly Salary", min_value=0.0, value=5000.0, step=100.0)
+        requested_amount = st.number_input("Requested Loan Amount", min_value=100.0, value=50000.0, step=1000.0)
 
-        # --- Expense Inputs (Row 3) ---
-        col9, col10, col11 = st.columns(3)
-        with col9:
-            monthly_rent = st.number_input("Monthly Rent ($)", 0.0, 50000.0, 5000.0)
-            school_fees = st.number_input("School Fees ($)", 0.0, 50000.0, 0.0)
-            college_fees = st.number_input("College Fees ($)", 0.0, 50000.0, 0.0)
-        with col10:
-            travel_expenses = st.number_input("Travel Expenses ($)", 0.0, 10000.0, 2500.0)
-            groceries_utilities = st.number_input("Groceries & Utilities ($)", 0.0, 30000.0, 8000.0)
-            other_monthly_expenses = st.number_input("Other Expenses ($)", 0.0, 20000.0, 5000.0)
-        with col11:
-            current_emi_amount = st.number_input("Current EMI Amount ($)", 0.0, 50000.0, 10000.0)
-            emi_scenario = st.selectbox("EMI Scenario", ["Personal Loan EMI", "Car Loan EMI", "Home Loan EMI"])
+    with col5:
+        bank_balance = st.number_input("Bank Balance (Current Liquidity)", min_value=0.0, value=15000.0, step=100.0)
+        current_emi_amount = st.number_input("Existing EMI Amount (if any)", min_value=0.0, value=300.0, step=50.0)
+        
+    with col6:
+        # Placeholder for future features
+        pass 
 
-        submitted = st.form_submit_button("Run Prediction")
+    st.markdown("---")
+    st.subheader("Monthly Expenses (USD)")
 
-    if submitted:
-        st.subheader("Prediction Results")
-        
-        # 4. Compile Data
-        raw_data = {
-            'age': age, 'gender': gender, 'marital_status': marital_status, 'education': education, 
-            'monthly_salary': monthly_salary, 'employment_type': employment_type, 
-            'years_of_employment': years_of_employment, 'company_type': company_type, 
-            'house_type': house_type, 'monthly_rent': monthly_rent, 'family_size': family_size, 
-            'dependents': dependents, 'school_fees': school_fees, 'college_fees': college_fees, 
-            'travel_expenses': travel_expenses, 'groceries_utilities': groceries_utilities, 
-            'other_monthly_expenses': other_monthly_expenses, 'existing_loans': existing_loans, 
-            'current_emi_amount': current_emi_amount, 'credit_score': credit_score, 
-            'bank_balance': bank_balance, 'emergency_fund': emergency_fund, 'emi_scenario': emi_scenario, 
-            'requested_amount': requested_amount, 'requested_tenure': requested_tenure
-        }
-        
-        input_df = pd.DataFrame([raw_data])
-        
-        # 5. Apply Feature Engineering
-        X_pred = apply_feature_engineering(input_df.copy())
-        
-        # 6. Make Predictions
-        cls_pred = CLS_PIPELINE.predict(X_pred)[0]
-        cls_proba = CLS_PIPELINE.predict_proba(X_pred)[0]
-        predicted_proba = np.max(cls_proba)
-        
-        log_reg_pred = REG_PIPELINE.predict(X_pred)[0]
-        max_emi_pred = np.expm1(log_reg_pred)
-        
-        # 7. Display Results
-        col_cls, col_reg = st.columns(2)
-        
-        with col_cls:
-            if cls_pred == 'Eligible':
-                st.success("✅ Loan Eligibility: **ELIGIBLE**", icon="💰")
-            elif cls_pred == 'High_Risk':
-                st.warning("⚠️ Loan Eligibility: **HIGH RISK**", icon="📉")
-            else:
-                st.error("❌ Loan Eligibility: **NOT ELIGIBLE**", icon="🛑")
-            st.metric(label="Prediction Confidence", value=f"{predicted_proba:.2%}")
+    # --- Row 3: Expenses ---
+    col7, col8, col9 = st.columns(3)
+    
+    with col7:
+        monthly_rent = st.number_input("Monthly Rent/Mortgage", min_value=0.0, value=800.0, step=50.0)
+        groceries_utilities = st.number_input("Groceries & Utilities", min_value=0.0, value=500.0, step=50.0)
+    
+    with col8:
+        school_fees = st.number_input("School Fees", min_value=0.0, value=200.0, step=50.0)
+        college_fees = st.number_input("College Fees", min_value=0.0, value=0.0, step=50.0)
 
-        with col_reg:
-            st.info("🎯 Maximum Recommended Monthly EMI")
-            st.metric(label="Affordable EMI", value=f"${max_emi_pred:,.2f}")
+    with col9:
+        travel_expenses = st.number_input("Travel Expenses", min_value=0.0, value=150.0, step=10.0)
+        other_monthly_expenses = st.number_input("Other Monthly Expenses", min_value=0.0, value=100.0, step=10.0)
 
-        st.markdown("---")
-        st.subheader("Business Recommendation")
+    # --- Submit Button ---
+    submitted = st.form_submit_button("Get EMI Prediction")
+
+# --- 3. Prediction Logic ---
+
+if submitted:
+    
+    # --- 4. Feature Engineering (Must match the training script!) ---
+    epsilon = 1e-6 # To prevent division by zero
+    
+    # Total monthly expenses (excluding current EMI)
+    total_non_emi_expenses = monthly_rent + school_fees + college_fees + travel_expenses + groceries_utilities + other_monthly_expenses
+    
+    # Total debt (including current EMI)
+    total_debt = total_non_emi_expenses + current_emi_amount
+
+    # Calculated Features (Ensure denominator uses the raw value)
+    DTI_ratio = total_debt / (monthly_salary + epsilon) # Debt-to-Income Ratio
+    LTI_ratio = requested_amount / (monthly_salary + epsilon) # Loan-to-Income Ratio
+    ETI_ratio = total_non_emi_expenses / (monthly_salary + epsilon) # Expense-to-Income Ratio
+    liquidity_to_loan_ratio = bank_balance / (requested_amount + epsilon) # Liquidity to Loan Ratio
+    employment_stability_score = years_of_employment / (age + epsilon) # Employment Stability
+    bank_health_score = bank_balance / (monthly_salary + epsilon) # Bank Balance to Monthly Salary
+    
+    # Interaction Features
+    capped_DTI_safety = 1 - np.minimum(DTI_ratio, 1.0)
+    credit_debt_interaction = credit_score * capped_DTI_safety
+    salary_balance_interaction = monthly_salary * bank_balance
+    
+    # --- 5. Create DataFrame for Prediction ---
+    input_data = {
+        # Demographics
+        'age': age,
+        'gender': gender,
+        'marital_status': marital_status,
+        'education_level': education,
+        'employment_type': employment_type,
+        'years_of_employment': years_of_employment,
+        'num_dependents': num_dependents,
+        'credit_score': credit_score,
         
+        # Financials (Raw inputs used by the model)
+        'monthly_salary': monthly_salary,
+        'bank_balance': bank_balance,
+        'requested_amount': requested_amount,
+        'current_emi_amount': current_emi_amount,
+
+        # Expenses (Raw inputs used by the model)
+        'monthly_rent': monthly_rent,
+        'school_fees': school_fees,
+        'college_fees': college_fees,
+        'travel_expenses': travel_expenses,
+        'groceries_utilities': groceries_utilities,
+        'other_monthly_expenses': other_monthly_expenses,
+
+        # Engineered Features (Must match the exact list used for training)
+        'DTI_ratio': DTI_ratio,
+        'LTI_ratio': LTI_ratio,
+        'ETI_ratio': ETI_ratio,
+        'liquidity_to_loan_ratio': liquidity_to_loan_ratio,
+        'employment_stability_score': employment_stability_score,
+        'bank_health_score': bank_health_score,
+        'credit_debt_interaction': credit_debt_interaction,
+        'salary_balance_interaction': salary_balance_interaction,
+    }
+    
+    X_pred = pd.DataFrame([input_data])
+    
+    # --- 6. Make Predictions ---
+    
+    # Classification Prediction (Eligibility)
+    cls_pred = CLASSIFIER.predict(X_pred)[0]
+    
+    # Classification Probability (Confidence)
+    cls_proba = CLASSIFIER.predict_proba(X_pred)[0]
+    predicted_proba = np.max(cls_proba)
+    
+    # Regression Prediction (Max EMI)
+    # The regressor was trained on log-transformed target (log1p)
+    log_reg_pred = REGRESSOR.predict(X_pred)[0]
+    max_emi_pred = np.expm1(log_reg_pred) # Inverse transformation: expm1(log_reg_pred) = exp(log_reg_pred) - 1
+    
+    # --- 7. Display Results ---
+    st.markdown("## 📊 Prediction Results")
+    col_cls, col_reg = st.columns(2)
+    
+    with col_cls:
+        st.subheader("Loan Eligibility Assessment")
         if cls_pred == 'Eligible':
-            st.markdown(f"**Recommendation:** **Approve** the loan. The customer is low-risk and can afford an EMI of up to **${max_emi_pred:,.2f}**.")
+            st.success("✅ Loan Eligibility: **ELIGIBLE**", icon="💰")
         elif cls_pred == 'High_Risk':
-            st.markdown(f"**Recommendation:** **Conditional Approval**. The customer is moderate-risk. Offer a loan with a higher interest rate or shorter tenure, ensuring the EMI is strictly below **${max_emi_pred:,.2f}**.")
+            st.warning("⚠️ Loan Eligibility: **HIGH RISK**", icon="📉")
         else:
-            st.markdown(f"**Recommendation:** **Reject** the application. The customer poses a high risk of default.")
+            st.error("❌ Loan Eligibility: **NOT ELIGIBLE**", icon="🛑")
+        
+        st.metric(label="Prediction Confidence", value=f"{predicted_proba:.2%}")
+
+    with col_reg:
+        st.subheader("Affordable EMI Calculation")
+        st.info("🎯 Maximum Recommended Monthly EMI")
+        st.metric(label="Affordable EMI", value=f"${max_emi_pred:,.2f}")
+
+    st.markdown("---")
+    st.subheader("Business Recommendation")
+    
+    if cls_pred == 'Eligible':
+        st.markdown(f"**Recommendation:** **Approve** the loan. The customer is low-risk and can afford an EMI of up to **${max_emi_pred:,.2f}**.")
+    elif cls_pred == 'High_Risk':
+        st.markdown(f"**Recommendation:** **Conditional Approval**. The customer is moderate-risk. Offer a reduced loan amount or a strict EMI of no more than **${max_emi_pred:,.2f}**.")
+    else:
+        st.markdown(f"**Recommendation:** **Decline** the loan request. The customer's financial profile indicates a high risk of default, as they can only afford an EMI of **${max_emi_pred:,.2f}**, which may be insufficient for the requested amount.")
