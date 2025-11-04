@@ -8,6 +8,7 @@ from math import log1p
 # --- Streamlit Page Setup ---
 st.title("📈 Real-time Risk Prediction")
 st.markdown("---")
+st.subheader("Input Customer Financial Details")
 
 # --- 1. Access Models from Session State (Robust Method) ---
 # The models MUST be loaded and stored in st.session_state in Home.py first.
